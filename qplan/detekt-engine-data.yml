@@ -3,3 +3,6 @@
 engine-data-rules:
   EngineOutputDataOverride:
     active: true
+  EngineUnionMembership:
+    active: true
+    reportUnknown: false

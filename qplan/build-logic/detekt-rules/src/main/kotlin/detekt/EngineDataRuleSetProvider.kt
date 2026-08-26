@@ -14,7 +14,8 @@ class EngineDataRuleSetProvider : RuleSetProvider {
         RuleSet(
             ruleSetId,
             listOf(
-                EngineOutputDataOverrideRule(config)
+                EngineOutputDataOverrideRule(config),
+                EngineUnionMembershipRule(config)
             )
         )
 }
