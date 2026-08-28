@@ -16,6 +16,14 @@ private val modelSource = """
     typealias EngineSimpleData = Any
     typealias EngineInputData = Any
     typealias EngineOutputData = Any
+    typealias ArgumentExpression = Any
+
+    sealed interface Arguments {
+        sealed interface Variable
+    }
+
+    data object ArgumentResolutionError
+    data object VariableImpl : Arguments.Variable
 
     sealed interface EngineErrorData {
         companion object {
@@ -121,6 +129,50 @@ class EngineUnionMembershipRuleTest(private val env: KotlinCoreEnvironment) {
         )
 
         assertTrue(findings.isEmpty(), findings.joinToString())
+    }
+
+    @Test
+    fun `argument expressions accept input members variables errors and recursive collections`() {
+        val findings = lint(
+            """
+            package sample
+
+            import model.ArgumentExpression
+            import model.ArgumentResolutionError
+            import model.Arguments
+            import model.VariableImpl
+
+            fun variable(): Arguments.Variable = VariableImpl
+
+            val scalar: ArgumentExpression = 1
+            val inputList: ArgumentExpression = listOf(mapOf("count" to 1))
+            val inputMap: ArgumentExpression = mapOf("items" to listOf(false))
+            val variableExpression: ArgumentExpression = variable()
+            val errorExpression: ArgumentExpression = ArgumentResolutionError
+            """,
+        )
+
+        assertTrue(findings.isEmpty(), findings.joinToString())
+    }
+
+    @Test
+    fun `argument expressions reject output-only members and invalid map keys`() {
+        val findings = lint(
+            """
+            package sample
+
+            import model.ArgumentExpression
+            import model.EngineErrorData
+            import viaduct.engine.api.EngineObjectData
+
+            val error: ArgumentExpression = EngineErrorData.of()
+            val objectData: ArgumentExpression = EngineObjectData.Sync
+            val invalidMap: ArgumentExpression = mapOf(1 to "value")
+            """,
+            additionalSources = listOf(engineObjectDataSource),
+        )
+
+        assertForbidden(findings, expectedCount = 3)
     }
 
     @Test

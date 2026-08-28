@@ -1,6 +1,8 @@
 # Config for the type-resolution detekt tasks wired in model/build.gradle.kts. Only the custom
 # rules below are active here.
 engine-data-rules:
+  ArgumentExpressionAlias:
+    active: true
   EngineOutputDataOverride:
     active: true
   EngineUnionMembership:

@@ -60,6 +60,17 @@ internal fun engineDataContracts(): List<DomainContract> = listOf(
         ),
         allowsLists = true,
     ),
+    DomainContract(
+        aliasFqName = "model.ArgumentExpression",
+        displayName = "ArgumentExpression",
+        scalarMembers = SIMPLE_MEMBERS,
+        namedMembers = setOf(
+            "model.ArgumentResolutionError",
+            "model.Arguments.Variable",
+        ),
+        allowsLists = true,
+        allowsMaps = true,
+    ),
 )
 
 /**
