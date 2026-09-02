@@ -145,9 +145,9 @@ private fun EngineTestModule.validateSupportedExecutors() {
         if (executor.isSelective) {
             TODO("Qplan feature tests do not support selective field executor ${coordinate.render()}")
         }
-        if (executor.querySelectionSet != null) {
-            TODO("Qplan feature tests do not support query required selections for ${coordinate.render()}")
-        }
+        // if (executor.querySelectionSet != null) {
+        //     TODO("Qplan feature tests do not support query required selections for ${coordinate.render()}")
+        // }
     }
     nodeResolverExecutors.forEach { (typeName, executor) ->
         if (executor.isBatching) {

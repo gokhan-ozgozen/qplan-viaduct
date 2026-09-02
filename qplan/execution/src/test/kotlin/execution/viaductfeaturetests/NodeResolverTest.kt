@@ -508,7 +508,6 @@ class NodeResolverTest {
         }
     }
 
-    @Disabled("TODO: QueryRss")
     @Test
     fun `node resolver not executed twice for the same query path`() {
         // This is a regression test for NodeEngineObjectDataImpl.resolveData() calling the
