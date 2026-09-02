@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Disabled
 
 class Resolver26PassiveMaterializationIsolationTest {
     // Original: execution/src/test/kotlin/execution/viaductfeaturetests/RequiredSelectionsTest.kt:483
+    // Relates: semantics/src/main/kotlin/semantics/resolver26/ObjectOrchestrationTask.kt:89
     @Disabled("ISOLATION: User.parent not materialized by resolvePassiveValues")
     @Test
     fun `passive parent field materialization`() {

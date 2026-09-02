@@ -428,6 +428,7 @@ class Resolver26QueryFragmentIsolationTest {
     }
 
     // Original: execution/src/test/kotlin/execution/viaductfeaturetests/NodeResolverTest.kt:511
+    // Relates: semantics/src/main/kotlin/semantics/resolver26/FieldResolverTask.kt:143
     @Disabled("ISOLATION: query fragment refetches the same node; expected 1 call, observed 2")
     @Test
     fun `node resolver is reused by a query fragment on the same path`() {

@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Disabled
 
 class Resolver26MechAdaptIsolationTest {
     // Original: execution/src/test/kotlin/execution/viaductfeaturetests/RequiredSelectionsTest.kt:192
+    // Relates: model/src/testFixtures/kotlin/model/testing/GJSelectionParser.kt:198
     @Disabled("ISOLATION: GJSelectionParser defers applied directives")
     @Test
     fun `child RSS prunes conditionally skipped field`() {
@@ -125,6 +126,7 @@ class Resolver26MechAdaptIsolationTest {
     }
 
     // Original: execution/src/test/kotlin/execution/viaductfeaturetests/RequiredSelectionsTest.kt:1286
+    // Relates: model/src/testFixtures/kotlin/model/testing/TestResolverRegistry.kt:751
     @Disabled("ISOLATION: resolver-demand cycle rejected; source cycle is checker-only")
     @Test
     fun `sibling cyclic resolver requirements without checker`() {
