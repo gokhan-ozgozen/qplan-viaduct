@@ -57,6 +57,16 @@ class ParentFieldsTest {
     }
 
     @Test
+    fun `object union rejects a one-sided parent result subtree`() {
+        val assumptions = TestWorld.fromSDL(SINGULAR_PARENT_SCHEMA).assumptions
+        val withChild = assumptions.parentResult()
+        val withoutChild = ObjectEngineResult.of(withChild.type)
+
+        assertFailsWith<IllegalArgumentException> { withChild.union(withoutChild) }
+        assertFailsWith<IllegalArgumentException> { withoutChild.union(withChild) }
+    }
+
+    @Test
     fun `parent conformance rejects a reference to a different parent occurrence`() {
         val assumptions = TestWorld.fromSDL(SINGULAR_PARENT_SCHEMA).assumptions
         val schema = assumptions.schema

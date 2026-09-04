@@ -548,6 +548,9 @@ private fun CompletedCell.union(other: CompletedCell): CompletedCell =
  * @throws IllegalArgumentException when the object types differ or any shared cell has no union
  */
 internal fun ObjectEngineResult.union(other: ObjectEngineResult): ObjectEngineResult {
+    require(!containsParentBackedge() && !other.containsParentBackedge()) {
+        "Cannot union engine-result graphs containing parent backedges"
+    }
     require(type == other.type) {
         "Cannot union object engine results of different types"
     }
@@ -574,6 +577,9 @@ internal fun ObjectEngineResult.union(other: ObjectEngineResult): ObjectEngineRe
  * corresponding cells have no union
  */
 internal fun ListEngineResult.union(other: ListEngineResult): ListEngineResult {
+    require(!containsParentBackedge() && !other.containsParentBackedge()) {
+        "Cannot union engine-result graphs containing parent backedges"
+    }
     require(typeExpr == other.typeExpr) {
         "Cannot union list engine results with different element types"
     }
