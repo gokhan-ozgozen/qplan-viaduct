@@ -10,12 +10,49 @@ import model.SelectionForest
 import model.containsErrorValue
 import model.flatMapToSelectionForest
 import model.objectKey
+import model.merge
+import model.requireField
 import model.selectionForestOf
 
 // Returns ground output demand, crossing open resolver boundaries without binding their arguments.
 context(world: Assumptions)
 internal fun SelectionForest.successorDemand(): SelectionForest =
-    successorDemandWithMemo(mutableMapOf())
+    liftParentDemand()
+        .successorDemandWithMemo(mutableMapOf())
+        .liftParentDemand()
+
+// Conservatively transposes parent-selected demand to each containing producer occurrence.
+context(world: Assumptions)
+private fun SelectionForest.liftParentDemand(): SelectionForest =
+    flatMap { selection ->
+        val nested = selection.subselections.liftParentDemand()
+        val requested =
+            Selection.of(
+                key = selection.key,
+                possibleTypes = selection.possibleTypes,
+                subselections = nested,
+            )
+        val lifted =
+            selection.possibleTypes.flatMapToSelectionForest { possibleType ->
+                val producer = possibleType.requireField(selection.key.field.name)
+                val childType = producer.type.baseTypeDef as? ViaductSchema.Object
+                    ?: return@flatMapToSelectionForest selectionForestOf()
+                nested
+                    .merge(childType)
+                    .byKey()
+                    .values
+                    .filter { childSelection ->
+                        val parentKey = childSelection.key as? ObjectEngineResult.ParentKey
+                        parentKey != null &&
+                            world.parentFieldRelations.relation(parentKey.field)?.producerField ==
+                            producer
+                    }
+                    .fold(selectionForestOf()) { demand, parentSelection ->
+                        demand + parentSelection.subselections
+                    }
+            }
+        selectionForestOf(requested) + lifted
+    }
 
 // Retains requested ground boundaries and adds each resolver-bearing boundary's fixed passive demand.
 context(world: Assumptions)

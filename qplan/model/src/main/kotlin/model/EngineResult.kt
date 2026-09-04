@@ -5,13 +5,15 @@ import viaduct.graphql.schema.ViaductSchema
 import model.invariants.conformsToResultSchemaType
 
 /**
- * A finite, well-founded field-resolution result.
+ * A finite field-resolution result whose only reference edges are distinguished parent fields.
  *
  * The semantic union contains Int, finite Double, Boolean, String, [EngineIDResult],
  * [ViaductSchema.EnumValue], [ObjectEngineResult], [ListEngineResult], or [ErrorEngineResult]. Nullable
  * uses additionally represent GraphQL null. Membership and schema compatibility are enforced by
- * result constructors and cell completion boundaries. This union is equality-heterogeneous;
- * equality is defined only after narrowing to a member or homogeneous subset.
+ * result constructors and cell completion boundaries. Ordinary value containment is well-founded;
+ * a [ObjectEngineResult.ParentKey] cell may additionally point to an existing ancestor OER. This
+ * union is equality-heterogeneous; equality is defined only after narrowing to a member or
+ * homogeneous subset.
  */
 typealias EngineResult = Any
 
@@ -202,7 +204,7 @@ sealed interface ObjectEngineResult {
                     "Key arguments do not belong to its output field"
                 }
                 return if (arguments is Arguments.Ground) {
-                    GroundKeyImpl(field, arguments)
+                    GroundKey.of(field, arguments)
                 } else {
                     ObjectKeyImpl(field, arguments)
                 }
@@ -235,7 +237,37 @@ sealed interface ObjectEngineResult {
                 require(arguments.conformsToArgumentDefinition(field)) {
                     "Key arguments do not belong to its output field"
                 }
-                return GroundKeyImpl(field, arguments)
+                return if (field.isParentField()) {
+                    ParentKey.of(field, arguments)
+                } else {
+                    GroundKeyImpl(field, arguments)
+                }
+            }
+        }
+    }
+
+    /**
+     * A no-argument engine-provided field whose value references the containing object's parent.
+     *
+     * Parent keys remain ordinary selection and OER lookup keys. The refinement lets structural
+     * result algorithms avoid recursively unfolding their ancestor backedges.
+     */
+    sealed interface ParentKey : GroundKey {
+        companion object {
+            fun of(field: ViaductSchema.ObjectField): ParentKey =
+                of(field, Arguments.Resolved.of(field, emptyMap()))
+
+            fun of(
+                field: ViaductSchema.ObjectField,
+                arguments: Arguments.Ground,
+            ): ParentKey {
+                require(field.isParentField()) {
+                    "Parent key field must carry @$PARENT_DIRECTIVE_NAME"
+                }
+                require(arguments is Arguments.Resolved && arguments.fieldValues.isEmpty()) {
+                    "Parent key field must have no arguments"
+                }
+                return ParentKeyImpl(field, arguments)
             }
         }
     }
@@ -407,10 +439,24 @@ private fun EngineResult?.hasSameCompletedResultAs(other: EngineResult?): Boolea
     }
 }
 
-private fun EngineResultCell.hasSameCompletedCellAs(other: EngineResultCell): Boolean {
+private fun EngineResultCell.hasSameCompletedCellAs(
+    other: EngineResultCell,
+    followValue: Boolean = true,
+): Boolean {
     val leftValue = completedValue
     val rightValue = other.completedValue
-    return leftValue.hasSameCompletedResultAs(rightValue) &&
+    val sameValue =
+        if (followValue) {
+            leftValue.hasSameCompletedResultAs(rightValue)
+        } else {
+            when {
+                leftValue == null || rightValue == null -> leftValue == null && rightValue == null
+                leftValue is ObjectEngineResult && rightValue is ObjectEngineResult ->
+                    leftValue.type == rightValue.type
+                else -> false
+            }
+        }
+    return sameValue &&
         completedAccessResult.hasSameCompletedAccessResultAs(other.completedAccessResult)
 }
 
@@ -436,6 +482,9 @@ internal fun EngineResult?.union(other: EngineResult?): EngineResult? {
         return null
     }
     require(other != null) { "Cannot union null and non-null engine results" }
+    require(!containsParentBackedge() && !other.containsParentBackedge()) {
+        "Cannot union engine-result graphs containing parent backedges"
+    }
 
     return when (this) {
         is ErrorEngineResult -> {
@@ -470,6 +519,18 @@ internal fun EngineResult?.union(other: EngineResult?): EngineResult? {
     }
 }
 
+private fun EngineResult.containsParentBackedge(): Boolean =
+    when (this) {
+        is ObjectEngineResult ->
+            keys.any { key -> key is ObjectEngineResult.ParentKey } ||
+                keys.any { key ->
+                    getCell(key).getValue().get()?.containsParentBackedge() == true
+                }
+        is ListEngineResult ->
+            any { cell -> cell.getValue().get()?.containsParentBackedge() == true }
+        else -> false
+    }
+
 /**
  * Returns the union of this completed cell and [other].
  *
@@ -487,6 +548,9 @@ private fun CompletedCell.union(other: CompletedCell): CompletedCell =
  * @throws IllegalArgumentException when the object types differ or any shared cell has no union
  */
 internal fun ObjectEngineResult.union(other: ObjectEngineResult): ObjectEngineResult {
+    require(!containsParentBackedge() && !other.containsParentBackedge()) {
+        "Cannot union engine-result graphs containing parent backedges"
+    }
     require(type == other.type) {
         "Cannot union object engine results of different types"
     }
@@ -513,6 +577,9 @@ internal fun ObjectEngineResult.union(other: ObjectEngineResult): ObjectEngineRe
  * corresponding cells have no union
  */
 internal fun ListEngineResult.union(other: ListEngineResult): ListEngineResult {
+    require(!containsParentBackedge() && !other.containsParentBackedge()) {
+        "Cannot union engine-result graphs containing parent backedges"
+    }
     require(typeExpr == other.typeExpr) {
         "Cannot union list engine results with different element types"
     }
@@ -582,8 +649,9 @@ private class CellImpl(
         if (mutable) valueStore.freeze(cause)
     }
 
-    fun requireCompleted() {
-        valueStore.readOrNull()?.get().requireCompleted()
+    fun requireCompleted(followValue: Boolean = true) {
+        val value = valueStore.readOrNull()?.get()
+        if (followValue) value.requireCompleted()
         accessResultStore.snapshot().values.forEach { promise -> promise.get() }
     }
 
@@ -695,7 +763,9 @@ private class ObjectResultImpl(
         get() = cellStore.completedCells()
 
     fun requireCompleted() {
-        cellStore.cellValues.forEach { cell -> cell.implementation.requireCompleted() }
+        cellStore.cellEntries.forEach { (key, cell) ->
+            cell.implementation.requireCompleted(followValue = key !is ObjectEngineResult.ParentKey)
+        }
     }
 }
 
@@ -712,8 +782,8 @@ private class ObjectCellStore(
     val keys: Set<ObjectEngineResult.ObjectKey>
         get() = synchronized(lock) { keySnapshot }
 
-    val cellValues: List<EngineResultCell>
-        get() = synchronized(lock) { cells.values.toList() }
+    val cellEntries: List<Map.Entry<ObjectEngineResult.ObjectKey, EngineResultCell>>
+        get() = synchronized(lock) { cells.toMap().entries.toList() }
 
     fun isSet(field: ObjectEngineResult.ObjectKey): Boolean = synchronized(lock) { field in cells }
 
@@ -750,8 +820,12 @@ private class ObjectCellStore(
 
     fun completedCells(): Map<ObjectEngineResult.ObjectKey, EngineResultCell> =
         synchronized(lock) {
-            cells.mapValues { (_, cell) ->
-                cell.also { it.implementation.requireCompleted() }
+            cells.mapValues { (key, cell) ->
+                cell.also {
+                    it.implementation.requireCompleted(
+                        followValue = key !is ObjectEngineResult.ParentKey,
+                    )
+                }
             }
         }
 
@@ -802,6 +876,11 @@ private data class GroundKeyImpl(
     override val arguments: Arguments.Ground,
 ) : ObjectEngineResult.GroundKey
 
+private data class ParentKeyImpl(
+    override val field: ViaductSchema.ObjectField,
+    override val arguments: Arguments.Ground,
+) : ObjectEngineResult.ParentKey
+
 private data class CompletedCell(
     val value: EngineResult?,
     val accessResult: EngineResult?,
@@ -845,7 +924,10 @@ private fun ObjectEngineResult.sameCompletedObjectResultAs(other: ObjectEngineRe
             false
         } else {
             val rightCell = unmatchedRightCells.removeAt(matchIndex).value
-            leftCell.hasSameCompletedCellAs(rightCell)
+            leftCell.hasSameCompletedCellAs(
+                rightCell,
+                followValue = leftKey !is ObjectEngineResult.ParentKey,
+            )
         }
     }
 }

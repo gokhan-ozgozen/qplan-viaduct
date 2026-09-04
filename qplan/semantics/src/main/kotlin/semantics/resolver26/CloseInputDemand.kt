@@ -25,6 +25,7 @@ context(world: Assumptions)
 internal fun EngineObjectData.Sync.closeInputDemand(
     occurrence: OEROccurrenceContext,
     initialDemand: SelectionForest,
+    alreadyExpanded: Set<ObjectEngineResult.ObjectKey> = emptySet(),
 ): CloseInputDemandResult {
     var accumulatedDemand: SelectionForest = initialDemand
     val expansions: MutableMap<ObjectEngineResult.ObjectKey, ResolverExpansion> =
@@ -40,6 +41,7 @@ internal fun EngineObjectData.Sync.closeInputDemand(
                 .byKey()
                 .filter { (objectKey, _) ->
                     requiresStandardResolution(objectKey) &&
+                        objectKey !in alreadyExpanded &&
                         objectKey !in expansions
                 }
         if (newResolverSelections.isEmpty()) {
@@ -48,7 +50,7 @@ internal fun EngineObjectData.Sync.closeInputDemand(
                     .byKey()
                     .filterKeys { objectKey ->
                         requiresStandardResolution(objectKey)
-                    }.keys == expansions.keys,
+                    }.keys == alreadyExpanded + expansions.keys,
             ) {
                 "Resolver26 closed demand and resolver expansions are misaligned"
             }

@@ -29,6 +29,7 @@ internal fun EngineOutputData?.resolvePassiveValues(
     path: List<PathComponent>,
     invocationDemand: SelectionForest,
     constructionDemand: SelectionForest,
+    parent: OEROccurrenceContext? = null,
 ): EngineResult? {
     require(conformsToOutputSchemaType(expectedType)) {
         "Resolver output does not conform to $expectedType"
@@ -42,6 +43,7 @@ internal fun EngineOutputData?.resolvePassiveValues(
                 path = path,
                 invocationDemand = invocationDemand,
                 constructionDemand = constructionDemand,
+                parent = parent,
             )
         is List<*> -> {
             val elementType = checkNotNull(expectedType.unwrapList())
@@ -55,6 +57,7 @@ internal fun EngineOutputData?.resolvePassiveValues(
                             path = path + ListEngineResult.Index.of(index),
                             invocationDemand = invocationDemand,
                             constructionDemand = constructionDemand,
+                            parent = parent,
                         )
                     },
             )
@@ -71,6 +74,7 @@ private fun EngineObjectData.Sync.resolvePassiveObjectValues(
     path: List<PathComponent>,
     invocationDemand: SelectionForest,
     constructionDemand: SelectionForest,
+    parent: OEROccurrenceContext?,
 ): ObjectEngineResult {
     val target =
         ObjectEngineResult.of(
@@ -82,6 +86,7 @@ private fun EngineObjectData.Sync.resolvePassiveObjectValues(
             root = root,
             path = path,
             target = target,
+            parent = parent,
         )
     val orchestration =
         ObjectOrchestrationTask(
@@ -102,7 +107,7 @@ private fun EngineObjectData.Sync.resolvePassiveObjectValues(
 
 // Copies every passive field returned by the resolver and orchestrates its value recursively.
 context(operation: Resolver26OperationContext)
-private fun EngineObjectData.Sync.materializePassiveFields(
+internal fun EngineObjectData.Sync.materializePassiveFields(
     occurrence: OEROccurrenceContext,
     invocationDemand: SelectionForest,
     closedDemand: ObjectSelectionForest,
@@ -139,6 +144,7 @@ private fun EngineObjectData.Sync.materializePassiveFields(
             demandedKeys += ObjectEngineResult.GroundKey.of(field, emptyMap())
         }
         demandedKeys.forEach { key ->
+            if (occurrence.target.isCellSet(key)) return@forEach
             val childInvocationDemand =
                 invocationDemandByKey[key]
                     ?.subselections
@@ -155,6 +161,7 @@ private fun EngineObjectData.Sync.materializePassiveFields(
                         path = occurrence.coordinate(key),
                         invocationDemand = childInvocationDemand,
                         constructionDemand = childConstructionDemand,
+                        parent = occurrence,
                     )
             occurrence.target.reserveCell(key).also { cell ->
                 cell.setValue(value)
