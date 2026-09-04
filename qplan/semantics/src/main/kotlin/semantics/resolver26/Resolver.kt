@@ -52,8 +52,9 @@ internal fun resolve(
         )
     return runBlocking(coroutineContext) {
         withTimeout(15_000) {
+            lateinit var resolver26Operation: Resolver26OperationContext
             coroutineScope {
-                val resolver26Operation =
+                resolver26Operation =
                     Resolver26OperationContext(
                         base = operation,
                         requestScope = this,
@@ -77,6 +78,7 @@ internal fun resolve(
                 orchestration.prepare()
                 orchestration.launch()
             }
+            resolver26Operation.objectOrchestrationState.freezeAll()
             result
         }
     }
