@@ -18,6 +18,7 @@ import model.registry.ResolverFragment
 import model.schemaType
 import semantics.correctresolution.argumentsContainErrorValue
 import semantics.resolvers.ResolvePassiveValuesResult
+import semantics.resolvers.PassiveObjectOccurrence
 import semantics.resolvers.closeResolverDemand
 import semantics.resolvers.materializedChildOccurrences
 import semantics.resolvers.resolvePassiveValues
@@ -47,6 +48,7 @@ internal class DepthFirstResolve(
             path = emptyList(),
             selections = selections,
             resolved = result,
+            ancestors = emptyList(),
         )
     }
 
@@ -57,12 +59,40 @@ internal class DepthFirstResolve(
         path: List<PathComponent>,
         selections: SelectionForest,
         resolved: ObjectEngineResult,
+        ancestors: List<PassiveObjectOccurrence>,
     ): ObjectEngineResult = context(operation, world) {
         require(resolved.type == source.schemaType) {
             "Initial result type ${resolved.type.name} does not match ${source.schemaType}"
         }
 
         val closedDemand = source.closeResolverDemand(root, path, selections)
+        val occurrence = PassiveObjectOccurrence(path, source, closedDemand, resolved)
+        closedDemand.byGroundKey().forEach { (key, selection) ->
+            if (key is ObjectEngineResult.ParentKey) {
+                val parent = ancestors.lastOrNull()
+                    ?: error("Parent field ${key.field.name} has no containing object occurrence")
+                val cell =
+                    if (resolved.isCellSet(key)) {
+                        resolved.getCell(key)
+                    } else {
+                        resolved.reserveCell(key).also { parentCell ->
+                            parentCell.setValue(parent.target)
+                            parentCell.setAccessResult(true)
+                        }
+                    }
+                check(cell.getValue().get() === parent.target) {
+                    "Parent field ${key.field.name} does not reference its containing object occurrence"
+                }
+                orchestrateKeys(
+                    source = parent.source,
+                    root = root,
+                    path = parent.path,
+                    selections = selection.subselections,
+                    resolved = parent.target,
+                    ancestors = ancestors.dropLast(1),
+                )
+            }
+        }
         source.materializedChildOccurrences(path, closedDemand, resolved)
             .forEach { passiveObjectOccurrence ->
                 orchestrateKeys(
@@ -71,6 +101,7 @@ internal class DepthFirstResolve(
                     path = passiveObjectOccurrence.path,
                     selections = passiveObjectOccurrence.selections,
                     resolved = passiveObjectOccurrence.target,
+                    ancestors = ancestors + occurrence,
                 )
             }
         val unresolvedKeys = closedDemand.groundKeys() - resolved.requireGroundKeys()
@@ -85,6 +116,7 @@ internal class DepthFirstResolve(
                         path = passiveObjectOccurrence.path,
                         selections = passiveObjectOccurrence.selections,
                         resolved = passiveObjectOccurrence.target,
+                        ancestors = ancestors + occurrence,
                     )
                 }
         }
@@ -223,6 +255,7 @@ internal class DepthFirstResolve(
             path = emptyList(),
             selections = queryFragment.constructionSelections,
             resolved = queryResult,
+            ancestors = emptyList(),
         )
         operation.resolverObserver.onQueryFragmentResult(
             queryFragment.resolverOccurrenceId,

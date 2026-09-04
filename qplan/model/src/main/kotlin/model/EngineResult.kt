@@ -204,7 +204,7 @@ sealed interface ObjectEngineResult {
                     "Key arguments do not belong to its output field"
                 }
                 return if (arguments is Arguments.Ground) {
-                    GroundKeyImpl(field, arguments)
+                    GroundKey.of(field, arguments)
                 } else {
                     ObjectKeyImpl(field, arguments)
                 }
