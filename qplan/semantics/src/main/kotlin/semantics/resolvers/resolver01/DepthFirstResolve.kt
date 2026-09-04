@@ -67,8 +67,15 @@ internal class DepthFirstResolve(
 
         val closedDemand = source.closeResolverDemand(root, path, selections)
         val occurrence = PassiveObjectOccurrence(path, source, closedDemand, resolved)
-        closedDemand.byGroundKey().forEach { (key, selection) ->
-            if (key is ObjectEngineResult.ParentKey) {
+        val missingKeys = closedDemand.groundKeys() - resolved.requireGroundKeys()
+        val missingResolverKeys =
+            missingKeys.filterNotTo(linkedSetOf()) { key ->
+                key is ObjectEngineResult.ParentKey
+            }
+        missingResolverKeys.forEach(resolved::reserveCell)
+        if (missingKeys.isNotEmpty()) {
+            closedDemand.byGroundKey().forEach { (key, selection) ->
+                if (key !is ObjectEngineResult.ParentKey) return@forEach
                 val parent = ancestors.lastOrNull()
                     ?: error("Parent field ${key.field.name} has no containing object occurrence")
                 val cell =
@@ -104,8 +111,7 @@ internal class DepthFirstResolve(
                     ancestors = ancestors + occurrence,
                 )
             }
-        val unresolvedKeys = closedDemand.groundKeys() - resolved.requireGroundKeys()
-        val orderedKeys = dependencyOrder(source, root, path, unresolvedKeys)
+        val orderedKeys = dependencyOrder(source, root, path, missingResolverKeys)
         orderedKeys.forEach { key ->
             val selection = closedDemand[key]
             resolveKey(source, root, path, selection, resolved)

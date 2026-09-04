@@ -14,7 +14,6 @@ import model.requireObjectField
 import model.testing.TestWorld
 import model.testing.fieldResolverOf
 import org.junit.jupiter.api.Test
-import semantics.shared.OperationContext
 import viaduct.engine.api.EngineObjectData
 
 /** Contract for engine-provided parent backedges and transitive ancestor demand. */
@@ -64,12 +63,7 @@ interface ParentFieldResolverContract : ResolverContract {
             world.operationSelectionsFrom(
                 "query { organization { company { users { organizationName } } } }",
             )
-        val result =
-            resolve(
-                operation = OperationContext(world),
-                root = world.objectOf("Query"),
-                selections = selections,
-            )
+        val result = resolveAndValidate(world, selections)
         val organization =
             assertIs<ObjectEngineResult>(
                 result.getCell(world.schema.contractKey("Query", "organization")).get(),
