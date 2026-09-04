@@ -15,6 +15,7 @@ import semantics.contract.EmptyObjectFragmentResolverContract
 import semantics.contract.NodeResolverContract
 import semantics.contract.ObjectFragmentFromArgumentResolverContract
 import semantics.contract.ObjectFragmentResolverContract
+import semantics.contract.ParentFieldResolverContract
 import semantics.contract.QueryFragmentResolverContract
 import semantics.contract.ResolverTaskObservation
 import semantics.contract.SometimesPassiveObjectFragmentResolverContract
@@ -25,6 +26,7 @@ class ResolverContractTest :
     EmptyObjectFragmentResolverContract,
     NodeResolverContract,
     ObjectFragmentResolverContract,
+    ParentFieldResolverContract,
     ObjectFragmentFromArgumentResolverContract,
     QueryFragmentResolverContract,
     SometimesPassiveResolverContract,

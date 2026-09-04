@@ -13,6 +13,8 @@ import model.schemaType
 import java.util.PriorityQueue
 import semantics.resolvers.closeResolverDemand
 import semantics.resolvers.materializedChildOccurrences
+import semantics.resolvers.installParentBackedges
+import semantics.resolvers.PassiveObjectOccurrence
 import semantics.resolvers.resolveRetainedObjects
 import semantics.resolvers.resolver01.DepthFirstResolve
 import semantics.resolvers.resolver01.requireGroundKeys
@@ -38,6 +40,7 @@ internal class DepthFirstReactor(
         val source: EngineObjectData.Sync,
         val selections: SelectionForest,
         val target: ObjectEngineResult,
+        val ancestors: List<PassiveObjectOccurrence> = emptyList(),
     ) : Task {
         init {
             require(source.schemaType == target.type) {
@@ -51,6 +54,7 @@ internal class DepthFirstReactor(
         val source: EngineObjectData.Sync,
         val selection: ObjectSelection,
         val target: ObjectEngineResult,
+        val ancestors: List<PassiveObjectOccurrence> = emptyList(),
     ) : Task {
         init {
             require(source.schemaType == target.type) {
@@ -88,6 +92,7 @@ internal class DepthFirstReactor(
                 source = source,
                 selections = selections,
                 target = result,
+                ancestors = emptyList(),
             ),
         )
 
@@ -148,6 +153,19 @@ internal class DepthFirstReactor(
 
     private fun SlotOrchestrator.execute() = context(operation, world) {
         val closedDemand = source.closeResolverDemand(result, path, selections)
+        val occurrence = PassiveObjectOccurrence(path, source, closedDemand, target)
+        target.installParentBackedges(closedDemand, ancestors.lastOrNull(), path)
+            .forEach { parentSelection ->
+                val parent = checkNotNull(ancestors.lastOrNull())
+                depthFirstResolve.orchestrateKeys(
+                    source = parent.source,
+                    root = result,
+                    path = parent.path,
+                    selections = parentSelection.subselections,
+                    resolved = parent.target,
+                    ancestors = ancestors.dropLast(1),
+                )
+            }
         source.materializedChildOccurrences(path, closedDemand, target)
             .forEach { passiveObjectOccurrence ->
                 enqueue(
@@ -156,6 +174,7 @@ internal class DepthFirstReactor(
                         source = passiveObjectOccurrence.source,
                         selections = passiveObjectOccurrence.selections,
                         target = passiveObjectOccurrence.target,
+                        ancestors = ancestors + occurrence,
                     ),
                 )
             }
@@ -169,6 +188,7 @@ internal class DepthFirstReactor(
                         source = source,
                         selection = closedDemand[key],
                         target = target,
+                        ancestors = ancestors,
                     ),
                 )
             }
@@ -182,6 +202,7 @@ internal class DepthFirstReactor(
     }
 
     private fun SlotResolver.execute() = context(operation, world) {
+        val occurrence = PassiveObjectOccurrence(path, source, selection.subselections, target)
         depthFirstResolve
             .resolveKey(source, result, path, selection, target)
             ?.resolveRetainedObjects { passiveObjectOccurrence ->
@@ -191,6 +212,7 @@ internal class DepthFirstReactor(
                         source = passiveObjectOccurrence.source,
                         selections = passiveObjectOccurrence.selections,
                         target = passiveObjectOccurrence.target,
+                        ancestors = ancestors + occurrence,
                     ),
                 )
             }

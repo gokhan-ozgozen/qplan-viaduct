@@ -21,6 +21,7 @@ import semantics.resolvers.ResolvePassiveValuesResult
 import semantics.resolvers.PassiveObjectOccurrence
 import semantics.resolvers.closeResolverDemand
 import semantics.resolvers.materializedChildOccurrences
+import semantics.resolvers.installParentBackedges
 import semantics.resolvers.resolvePassiveValues
 import semantics.resolvers.resolveRetainedObjects
 import semantics.shared.CycleCheckState
@@ -74,22 +75,9 @@ internal class DepthFirstResolve(
             }
         missingResolverKeys.forEach(resolved::reserveCell)
         if (missingKeys.isNotEmpty()) {
-            closedDemand.byGroundKey().forEach { (key, selection) ->
-                if (key !is ObjectEngineResult.ParentKey) return@forEach
-                val parent = ancestors.lastOrNull()
-                    ?: error("Parent field ${key.field.name} has no containing object occurrence")
-                val cell =
-                    if (resolved.isCellSet(key)) {
-                        resolved.getCell(key)
-                    } else {
-                        resolved.reserveCell(key).also { parentCell ->
-                            parentCell.setValue(parent.target)
-                            parentCell.setAccessResult(true)
-                        }
-                    }
-                check(cell.getValue().get() === parent.target) {
-                    "Parent field ${key.field.name} does not reference its containing object occurrence"
-                }
+            resolved.installParentBackedges(closedDemand, ancestors.lastOrNull(), path)
+                .forEach { selection ->
+                val parent = checkNotNull(ancestors.lastOrNull())
                 orchestrateKeys(
                     source = parent.source,
                     root = root,

@@ -40,6 +40,42 @@ internal class PassiveObjectOccurrence(
     val target: ObjectEngineResult,
 )
 
+/** Installs every selected parent field as a reference to [parent] and returns its selections. */
+context(operation: OperationContext)
+internal fun ObjectEngineResult.installParentBackedges(
+    selections: ObjectSelectionForest,
+    parent: PassiveObjectOccurrence?,
+    path: List<PathComponent>,
+): List<model.ObjectSelection> =
+    selections.byGroundKey().mapNotNull { (key, selection) ->
+        if (key !is ObjectEngineResult.ParentKey) return@mapNotNull null
+        val containingParent =
+            parent ?: error("Parent field ${key.field.name} has no containing object occurrence")
+        val producer =
+            path
+                .filterIsInstance<ObjectEngineResult.ObjectKey>()
+                .lastOrNull()
+                ?.field
+        require(
+            operation.world.parentFieldRelations.relation(key.field)?.producerField == producer,
+        ) {
+            "Parent field ${key.field.name} is not inverse to its containing producer occurrence"
+        }
+        val cell =
+            if (isCellSet(key)) {
+                getCell(key)
+            } else {
+                reserveCell(key).also { parentCell ->
+                    parentCell.setValue(containingParent.target)
+                    parentCell.setAccessResult(true)
+                }
+            }
+        check(cell.getValue().get() === containingParent.target) {
+            "Parent field ${key.field.name} does not reference its containing object occurrence"
+        }
+        selection
+    }
+
 /**
  * Eagerly materializes every argumentless field present in this output.
  *
