@@ -9,6 +9,7 @@ import model.ObjectSelectionForest
 import model.requireQueryTypeDef
 import model.SelectionForest
 import model.VariableBinding
+import model.merge
 import model.registry.VariableDefinition
 import model.schemaType
 import viaduct.engine.api.EngineObjectData
@@ -51,7 +52,7 @@ internal class ObjectOrchestrationTask(
             check(!prepared) {
                 "Resolver26 orchestration task at ${occurrence.path} was prepared twice"
             }
-            val closed = closeNextDemand()
+            val closed = closeNextDemand(initialDemand)
             prepared = true
             initialClosedDemand = closed
             operation.bindingDeclarationsState.markBindingsDeclared(occurrence.target)
@@ -92,7 +93,7 @@ internal class ObjectOrchestrationTask(
                     "Resolver26 ancestor demand reached an unprepared orchestration task"
                 }
                 accumulatedDemand += demand
-                closeNextDemand().also { next ->
+                closeNextDemand(demand).also { next ->
                     context(operation) {
                         source.materializePassiveFields(
                             occurrence = occurrence,
@@ -106,7 +107,7 @@ internal class ObjectOrchestrationTask(
         dispatch(closed)
     }
 
-    private fun closeNextDemand(): CloseInputDemandResult {
+    private fun closeNextDemand(newDemand: SelectionForest): CloseInputDemandResult {
         val closed =
             context(world) {
                 source.closeInputDemand(
@@ -117,9 +118,13 @@ internal class ObjectOrchestrationTask(
             }
         accumulatedDemand = closed.demand
         expandedKeys += closed.expansions.keys
+        val newParentDemand =
+            closed.expansions.values.fold(newDemand) { demand, expansion ->
+                demand + expansion.inputDemand
+            }
         context(operation) {
             declareBindings(closed)
-            installParentFields(closed)
+            installParentFields(newParentDemand)
         }
         return closed
     }
@@ -158,9 +163,9 @@ internal class ObjectOrchestrationTask(
     }
 
     context(operation: Resolver26OperationContext)
-    private fun installParentFields(closed: CloseInputDemandResult) {
+    private fun installParentFields(newDemand: SelectionForest) {
         val parentSelections =
-            closed.demand.byKey().filterKeys { key ->
+            newDemand.merge(occurrence.target.type).byKey().filterKeys { key ->
                 key is ObjectEngineResult.ParentKey
             }
         if (parentSelections.isEmpty()) return
@@ -172,7 +177,6 @@ internal class ObjectOrchestrationTask(
                 .filterIsInstance<ObjectEngineResult.ObjectKey>()
                 .lastOrNull()
                 ?.field
-        var installed = false
         parentSelections.keys.forEach { objectKey ->
             val key = objectKey as ObjectEngineResult.ParentKey
             require(world.parentFieldRelations.relation(key.field)?.producerField == producer) {
@@ -183,17 +187,14 @@ internal class ObjectOrchestrationTask(
                     cell.setValue(parent.target)
                     cell.setAccessResult(true)
                 }
-                installed = true
             }
             check(occurrence.target.getCell(key).getValue().get() === parent.target) {
                 "Parent field ${key.field.name} does not reference its containing object occurrence"
             }
         }
-        if (installed || closed.expansions.isNotEmpty()) {
-            val parentTask = operation.objectOrchestrationState.task(parent.target)
-            parentSelections.values.forEach { selection ->
-                parentTask.addDemand(selection.subselections)
-            }
+        val parentTask = operation.objectOrchestrationState.task(parent.target)
+        parentSelections.values.forEach { selection ->
+            parentTask.addDemand(selection.subselections)
         }
     }
 }
