@@ -482,6 +482,9 @@ internal fun EngineResult?.union(other: EngineResult?): EngineResult? {
         return null
     }
     require(other != null) { "Cannot union null and non-null engine results" }
+    require(!containsParentBackedge() && !other.containsParentBackedge()) {
+        "Cannot union engine-result graphs containing parent backedges"
+    }
 
     return when (this) {
         is ErrorEngineResult -> {
@@ -515,6 +518,18 @@ internal fun EngineResult?.union(other: EngineResult?): EngineResult? {
         }
     }
 }
+
+private fun EngineResult.containsParentBackedge(): Boolean =
+    when (this) {
+        is ObjectEngineResult ->
+            keys.any { key -> key is ObjectEngineResult.ParentKey } ||
+                keys.any { key ->
+                    getCell(key).getValue().get()?.containsParentBackedge() == true
+                }
+        is ListEngineResult ->
+            any { cell -> cell.getValue().get()?.containsParentBackedge() == true }
+        else -> false
+    }
 
 /**
  * Returns the union of this completed cell and [other].

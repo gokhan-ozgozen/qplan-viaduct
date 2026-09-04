@@ -53,6 +53,7 @@ class ParentFieldsTest {
 
         assertTrue(context(assumptions) { first.conformsToSchema() })
         assertTrue(first.sameCompletedResultAs(second))
+        assertFailsWith<IllegalArgumentException> { first.union(second) }
     }
 
     @Test
