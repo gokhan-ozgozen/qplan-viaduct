@@ -2,6 +2,7 @@ package semantics.contract
 
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotSame
 import kotlin.test.assertSame
 import model.ListEngineResult
 import model.Arguments
@@ -20,6 +21,59 @@ import viaduct.engine.api.EngineObjectData
 
 /** Contract for engine-provided parent backedges and transitive ancestor demand. */
 interface ParentFieldResolverContract : ResolverContract {
+    @Test
+    fun `materialized parent EOD is a copy of the ancestor value`() {
+        lateinit var sourceParent: EngineObjectData.Sync
+        val world =
+            TestWorld.fromSDL(
+                selectiveResolvers = selectiveResolvers,
+                schemaSDL =
+                    """
+                    directive @parent on FIELD_DEFINITION
+                    type Query { company: Company }
+                    type Company { name: String, user: User }
+                    type User { parent: Company @parent, label: String }
+                    """.trimIndent(),
+                fieldResolvers = { schema ->
+                    sourceParent = schema.objectOf("Company") { "name" setTo "Airbnb" }
+                    mapOf(
+                        schema.requireObjectField("Query", "company") to
+                            fieldResolverOf(schema.emptyFragmentOf("Query")) { _, _ ->
+                                sourceParent
+                            },
+                        schema.requireObjectField("Company", "user") to
+                            fieldResolverOf(schema.emptyFragmentOf("Company")) { _, _ ->
+                                schema.objectOf("User")
+                            },
+                        schema.requireObjectField("User", "label") to
+                            fieldResolverOf(
+                                schema.fragmentFrom(
+                                    "fragment ignored on User { parent { name } }",
+                                ),
+                            ) { input, _ ->
+                                val parent =
+                                    assertIs<EngineObjectData.Sync>(input.outputValue("parent"))
+                                assertNotSame(sourceParent, parent)
+                                parent.outputValue("name")
+                            },
+                    )
+                },
+            ).assumptions
+
+        val result = resolveAndValidate(world, "query { company { user { label } } }")
+        val company =
+            assertIs<ObjectEngineResult>(
+                result.getCell(world.schema.contractKey("Query", "company")).get(),
+            )
+        val user =
+            assertIs<ObjectEngineResult>(
+                company.getCell(world.schema.contractKey("Company", "user")).get(),
+            )
+
+        assertEquals("Airbnb", user.getCell(world.schema.contractKey("User", "label")).get())
+        assertSame(company, user.getCell(world.schema.contractKey("User", "parent")).get())
+    }
+
     @Test
     fun `parent demand retains child-owned symbolic arguments`() {
         val testWorld =
