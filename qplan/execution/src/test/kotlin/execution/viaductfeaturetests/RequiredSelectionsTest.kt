@@ -32,7 +32,6 @@ import viaduct.engine.runtime.execution.DefaultCoroutineInterop
 import viaduct.engine.runtime.execution.ExecutionParameters
 import viaduct.engine.runtime.execution.FieldChildPlan
 import viaduct.engine.runtime.execution.QueryPlan
-import viaduct.engine.runtime.tenantloading.RequiredSelectionsAreInvalid
 import viaduct.graphql.scopes.SchemaScopingMode
 import viaduct.graphql.scopes.SchemaView
 import viaduct.graphql.scopes.ScopedSchemaBuilder
@@ -2346,7 +2345,6 @@ class RequiredSelectionsTest {
                 .assertJson("""{"data": {"status": "System offline"}}""")
         }
 
-    @Disabled("N/A: Tests query-RSS parser failure during module construction.")
     @Test
     fun `queryValueFragment with unclosed brace should fail at build time`() {
         assertThrows<IllegalArgumentException> {
@@ -2362,7 +2360,6 @@ class RequiredSelectionsTest {
         }
     }
 
-    @Disabled("N/A: Tests query-RSS parser failure during module construction.")
     @Test
     fun `queryValueFragment with invalid field syntax should fail at build time`() {
         assertThrows<IllegalArgumentException> {
@@ -2378,10 +2375,9 @@ class RequiredSelectionsTest {
         }
     }
 
-    @Disabled("N/A: Tests schema validation of a query RSS during bootstrap.")
     @Test
     fun `queryValueFragment referencing non-existent field should fail at build time`() {
-        assertThrows<RequiredSelectionsAreInvalid> {
+        val err = assertThrows<IllegalArgumentException> {
             EngineTestModule("extend type Query { existingField: String, result: String }") {
                 fieldWithValue("Query" to "existingField", "value")
                 field("Query" to "result") {
@@ -2392,9 +2388,12 @@ class RequiredSelectionsTest {
                 }
             }.runQPlanFeatureTest { }
         }
+        assertTrue(
+            err.message.orEmpty().contains("Field 'nonExistentField' in type 'Query' is undefined"),
+            err.message.orEmpty(),
+        )
     }
 
-    @Disabled("N/A: Tests query-RSS parser failure during module construction.")
     @Test
     fun `queryValueFragment with invalid fragment syntax should fail at build time`() {
         assertThrows<IllegalArgumentException> {
@@ -2410,7 +2409,6 @@ class RequiredSelectionsTest {
         }
     }
 
-    @Disabled("N/A: Tests query-RSS parser failure during module construction.")
     @Test
     fun `queryValueFragment with invalid variable syntax should fail at build time`() {
         assertThrows<IllegalArgumentException> {
@@ -2426,7 +2424,6 @@ class RequiredSelectionsTest {
         }
     }
 
-    @Disabled("N/A: Tests query-RSS parser/shape validation during module construction.")
     @Test
     fun `queryValueFragment with empty selection set should fail at build time`() {
         assertThrows<IllegalArgumentException> {
@@ -2441,20 +2438,22 @@ class RequiredSelectionsTest {
         }
     }
 
-    @Disabled("N/A: Tests schema/type-condition validation during bootstrap.")
     @Test
     fun `queryValueFragment with wrong type condition should fail at build time`() {
-        assertThrows<RequiredSelectionsAreInvalid> {
-            EngineTestModule("extend type Query { field: String, result: String } extend type Mutation { dummy: String }") {
+        val err = assertThrows<IllegalArgumentException> {
+            EngineTestModule(
+                "extend type Query { field: String, result: String } type Other { field: String }",
+            ) {
                 fieldWithValue("Query" to "field", "value")
                 field("Query" to "result") {
                     resolver {
-                        querySelections("... on Mutation { field }") // Wrong type - should be Query
+                        querySelections("... on Other { field }") // Wrong type - should be Query
                         fn { _, _, _, _, _ -> "should not execute" }
                     }
                 }
             }.runQPlanFeatureTest { }
         }
+        assertTrue(err.message.orEmpty().contains("Invalid GraphQL fragment"), err.message.orEmpty())
     }
 
     @Disabled("TODO: VarCallbk Directive")
