@@ -24,17 +24,17 @@ One root `coroutineScope` owns the request. Every orchestration task and field-r
 
 Task completion is not a cross-task readiness protocol. Cross-task reads use OER value promises, binding promises, or an OER's bindings-declared signal. The dispatcher changes scheduling only; it does not change resolver, variable, path, or task identity.
 
-`Resolver26OperationContext` is the stable reference bundle for this scope. It extends the shared `OperationContext`, retains the request coroutine scope and Resolver26 observer, and exposes three independent mutable protocols as properties: `cycleChecker: CycleCheckState`, `bindingDeclarationsState: BindingDeclarationsState`, and `queryValuesState: QueryValuesState`. The context neither implements those protocols nor owns their mutable storage.
+`Resolver26OperationContext` is the stable reference bundle for this scope. It extends the shared `OperationContext`, retains the request coroutine scope and Resolver26 observer, and exposes four independent mutable protocols as properties: `cycleChecker: CycleCheckState`, `bindingDeclarationsState: BindingDeclarationsState`, `queryValuesState: QueryValuesState`, and `objectOrchestrationState: ObjectOrchestrationState`. The context neither implements those protocols nor owns their mutable storage.
 
-`OEROccurrenceContext` bundles the root OER, exact root-relative path, and target OER that remain unchanged while Resolver26 orchestrates or resolves one object occurrence. Primary-operation and Query-fragment roots create self-rooted occurrences. Passive object materialization creates descendant occurrences at the exact field-and-list path where each new target is published. This is deliberately Resolver26-local: it captures a coherent task boundary here without requiring unrelated model or resolver APIs to unpack and transform the bundle.
+`OEROccurrenceContext` bundles the root OER, exact root-relative structural path, target OER, and optional immediate parent occurrence that remain unchanged while Resolver26 orchestrates or resolves one object occurrence. Primary-operation and Query-fragment roots create self-rooted occurrences without parents. Passive object materialization creates descendant occurrences at the exact field-and-list path where each new target is published. This is deliberately Resolver26-local: it captures a coherent task boundary here without requiring unrelated model or resolver APIs to unpack and transform the bundle.
 
 ## Synchronous Demand Closure
 
-`ObjectOrchestrationTask.prepare` synchronously computes one final `ObjectSelectionForest` for its concrete OER.
+`ObjectOrchestrationTask.prepare` synchronously computes the initial closed `ObjectSelectionForest` for its concrete OER and establishes its binding-declaration domain. The request-local `ObjectOrchestrationState` registers exactly one task per OER so a child may later contribute lifted demand to its ancestor's task.
 
 Closure repeatedly expands each newly seen resolver `ObjectKey` whose field is absent from the source EOD with that resolver's complete object fragment instantiated at the resolver path. A source-present argumentless field remains unexpanded and is materialized from the source even when the registry contains its standard resolver. Expansion does not await argument bindings. It records the resolver template, its fixed input demand, and one definition for each instantiated variable.
 
-Every resolver key in the closed forest is represented either by the expansion map or by an argumentless source-provided field. There is no later demand contribution, re-orchestration loop, pending-demand registry, or outer fixpoint.
+Every resolver key in a closed wave is represented either by the expansion map or by an argumentless source-provided field. Ordinary descendant construction is parent-first, but a demanded parent key contributes its subselections to the registered ancestor task. That task closes and dispatches only the newly discovered expansions. Repeating this one-level lift handles grandparent demand without recursively traversing parent backedges as structural children.
 
 An open resolver key contributes its object-fragment dependencies before its arguments ground. If those arguments later become an error, those dependencies may have executed speculatively. That imprecision is accepted by the current model.
 
@@ -58,9 +58,9 @@ Readers never insert undeclared binding promises.
 
 Every argumentless field present in a resolver's source EOD is read by canonical field name through resolver26's local `resolvePassiveValues` path, including fields that have standard resolvers in the registry. Source-provided argument-bearing fields are errors. A demanded registry field absent from the source uses its standard resolver; a demanded non-registry field absent from the source remains an error.
 
-The field-resolution task builds the passive result tree supplied by the resolver before publishing the containing value. Resolver26 creates one `ObjectOrchestrationTask` with each OER and calls its non-suspending `prepare` function immediately. Prepare closes only construction demand propagated through the parent, using source presence to decide which standard resolvers remain actual work, then declares and marks bindings. Invocation demand separately validates selective output and guides recursive materialization of every passive returned field before the task's non-suspending `launch` function runs. This parent-first recursion establishes every descendant binding domain before field work starts.
+The field-resolution task builds the passive structural result tree supplied by the resolver before publishing the containing value. Resolver26 creates one `ObjectOrchestrationTask` with each OER and calls its non-suspending `prepare` function immediately. Prepare closes construction demand propagated through the containing field, using source presence to decide which standard resolvers remain actual work, then declares and marks bindings. It also installs each demanded `ParentKey` with the actual immediate ancestor OER and lifts the parent's subselections to that ancestor's registered task. Invocation demand separately validates selective output and guides recursive materialization of every passive returned field before the task's non-suspending `launch` function runs. This parent-first recursion establishes every descendant binding domain before field work starts.
 
-After passive children have launched, the parent launch validates its materialized passive cells. An object with no active expansions freezes synchronously without creating a coroutine. Otherwise, launch schedules the task's suspending `run` function to read providers associated with its active expansions, install active fields, and freeze the OER.
+After passive children have launched, the parent launch validates its materialized passive cells. An OER that cannot produce a parent-bearing child freezes eagerly after its local active work. A potential producer stays mutable so later child waves can lift demand into it; `ObjectOrchestrationState.freezeAll` freezes those OERs only after the request coroutine scope reaches quiescence.
 
 ## Active Installation And Freeze
 
@@ -70,7 +70,7 @@ Resolver26's `CycleCheckState` is explicit operation state. Installation registe
 
 `reserveCell` explicitly creates an unclaimed cell placeholder when needed. `Cell.createValuePromise` claims that placeholder for the writer. Strict claiming makes disagreement between readers and writers observable.
 
-After every local active key is contextually grounded and has claimed its symbolic cell, the orchestrator calls `freeze`. Freezing seals the OER key set and fails any unclaimed value placeholders. Claimed promises may complete after the OER is frozen.
+After every local active key is contextually grounded and has claimed its symbolic cell, an eagerly frozen orchestrator calls `freeze`. Freezing seals the OER key set and fails any unclaimed value placeholders. Claimed promises may complete after the OER is frozen. Potential parent-field producers instead remain open across incremental demand waves and freeze at request quiescence.
 
 ## Field Resolution
 
@@ -97,6 +97,10 @@ Resolver observations are semantically passive evidence. Resolver26 records Quer
 Successor demand is output projection, not input closure. It retains passive selections and argumentless resolver-bearing selections that the current resolver may supply. Argument-bearing resolver fields remain necessarily active.
 
 Each boundary resolver's fixed object fragment contributes its passive predecessor demand transitively, conservatively including argumentless resolver-bearing fields that may be supplied by an ancestor. The original downstream construction demand continues separately into each returned child OER, where source-sensitive synchronous closure assigns only unresolved work to standard resolvers.
+
+Successor-demand construction also transposes a selected child's `parent { ... }` demand into the containing producer selection. This static lift ensures a selective producer returns the necessary ancestor coordinates before child identity exists. Dynamic child orchestration repeats the lift with exact symbolic occurrence identity and can contribute new work to the ancestor task. List and nested-list child results are transparent to the ancestry relation: every contained child OER whose parent is demanded points to the same containing parent occurrence.
+
+Sometimes-passive active fields can make transitive ancestor demand speculative. If a grandchild field with `parent.parent` demand is later supplied passively, its standard resolver need not run but the lifted ancestor demand may already have caused extra resolution or materialization. Resolver26 deliberately accepts this marginal over-work rather than making demand closure depend on a later dynamic ownership decision.
 
 ## Strictness
 
