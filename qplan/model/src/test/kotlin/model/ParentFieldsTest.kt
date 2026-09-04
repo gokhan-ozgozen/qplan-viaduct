@@ -76,6 +76,36 @@ class ParentFieldsTest {
         assertFalse(context(assumptions) { result.conformsToSchema() })
     }
 
+    @Test
+    fun `parent conformance rejects a child reached through a different producer field`() {
+        val assumptions = TestWorld.fromSDL(ABSTRACT_CHILD_SCHEMA).assumptions
+        val schema = assumptions.schema
+        val parentType = schema.requireType("Parent") as viaduct.graphql.schema.ViaductSchema.Object
+        val childType = schema.requireType("Child") as viaduct.graphql.schema.ViaductSchema.Object
+        val parent = ObjectEngineResult.of(parentType, mutable = true)
+        val child =
+            ObjectEngineResult.of(
+                childType,
+                values =
+                    mapOf(
+                        ObjectEngineResult.ParentKey.of(
+                            schema.requireObjectField("Child", "parent"),
+                        ) to parent,
+                    ),
+            )
+        val alternateProducer =
+            ObjectEngineResult.GroundKey.of(
+                schema.requireObjectField("Parent", "entity"),
+                emptyMap(),
+            )
+        parent.reserveCell(alternateProducer).also { cell ->
+            cell.setValue(child)
+            cell.setAccessResult(true)
+        }
+
+        assertFalse(context(assumptions) { parent.conformsToSchema() })
+    }
+
     private fun Assumptions.parentResult(
         parentOverride: ObjectEngineResult? = null,
     ): ObjectEngineResult {
@@ -109,6 +139,15 @@ class ParentFieldsTest {
             type Query { parent: Parent }
             type Parent { child: Child }
             type Child { parent: Parent @parent }
+            """.trimIndent()
+
+        val ABSTRACT_CHILD_SCHEMA =
+            """
+            directive @parent on FIELD_DEFINITION
+            type Query { parent: Parent }
+            interface Entity { id: ID }
+            type Parent { child: Child, entity: Entity }
+            type Child implements Entity { id: ID, parent: Parent @parent }
             """.trimIndent()
     }
 }

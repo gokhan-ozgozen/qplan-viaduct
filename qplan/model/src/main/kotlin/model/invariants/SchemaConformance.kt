@@ -79,9 +79,14 @@ context(world: Assumptions)
 internal fun EngineResult.conformsToSchema(): Boolean =
     this.conformsToSchema(ancestors = emptyList())
 
+private data class StructuralAncestor(
+    val result: ObjectEngineResult,
+    val producerField: ViaductSchema.ObjectField,
+)
+
 context(world: Assumptions)
 private fun EngineResult.conformsToSchema(
-    ancestors: List<ObjectEngineResult>,
+    ancestors: List<StructuralAncestor>,
 ): Boolean {
     val result = this
     return when (result) {
@@ -94,10 +99,16 @@ private fun EngineResult.conformsToSchema(
                     key.conformsToSchema() &&
                     value.conformsToResultSchemaType(key.field.outputType) &&
                     if (key is ObjectEngineResult.ParentKey) {
-                        world.parentFieldRelations.relation(key.field) != null &&
-                            value === ancestors.lastOrNull()
+                        world.parentFieldRelations.relation(key.field)?.let { relation ->
+                            val ancestor = ancestors.lastOrNull()
+                            ancestor != null &&
+                                value === ancestor.result &&
+                                relation.producerField == ancestor.producerField
+                        } == true
                     } else {
-                        value?.conformsToSchema(ancestors + result) ?: true
+                        value?.conformsToSchema(
+                            ancestors + StructuralAncestor(result, key.field),
+                        ) ?: true
                     } &&
                     cell.getAccessResult().get().conformsToAccessResult()
             }
