@@ -2,11 +2,14 @@ package model
 
 import model.testing.GJSchema
 import model.testing.TestWorld
+import model.invariants.conformsToSchema
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertSame
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class ParentFieldsTest {
     @Test
@@ -42,12 +45,58 @@ class ParentFieldsTest {
         }
     }
 
+    @Test
+    fun `parent references form finite cyclic results with structural conformance`() {
+        val assumptions = TestWorld.fromSDL(SINGULAR_PARENT_SCHEMA).assumptions
+        val first = assumptions.parentResult()
+        val second = assumptions.parentResult()
+
+        assertTrue(context(assumptions) { first.conformsToSchema() })
+        assertTrue(first.sameCompletedResultAs(second))
+    }
+
+    @Test
+    fun `parent conformance rejects a reference to a different parent occurrence`() {
+        val assumptions = TestWorld.fromSDL(SINGULAR_PARENT_SCHEMA).assumptions
+        val schema = assumptions.schema
+        val unrelatedParent = ObjectEngineResult.of(schema.requireType("Parent") as viaduct.graphql.schema.ViaductSchema.Object)
+        val result = assumptions.parentResult(parentOverride = unrelatedParent)
+
+        assertFalse(context(assumptions) { result.conformsToSchema() })
+    }
+
+    private fun Assumptions.parentResult(
+        parentOverride: ObjectEngineResult? = null,
+    ): ObjectEngineResult {
+        val parentType = schema.requireType("Parent") as viaduct.graphql.schema.ViaductSchema.Object
+        val childType = schema.requireType("Child") as viaduct.graphql.schema.ViaductSchema.Object
+        val childKey = ObjectEngineResult.GroundKey.of(schema.requireObjectField("Parent", "child"), emptyMap())
+        val parentKey = ObjectEngineResult.ParentKey.of(schema.requireObjectField("Child", "parent"))
+        val parent = ObjectEngineResult.of(parentType, mutable = true)
+        val child =
+            ObjectEngineResult.of(
+                childType,
+                values = mapOf(parentKey to (parentOverride ?: parent)),
+            )
+        parent.reserveCell(childKey).setValue(child)
+        parent.reserveCell(childKey).setAccessResult(true)
+        return parent
+    }
+
     private companion object {
         val PARENT_SCHEMA =
             """
             directive @parent on FIELD_DEFINITION
             type Query { parent: Parent }
             type Parent { children: [[Child]] }
+            type Child { parent: Parent @parent }
+            """.trimIndent()
+
+        val SINGULAR_PARENT_SCHEMA =
+            """
+            directive @parent on FIELD_DEFINITION
+            type Query { parent: Parent }
+            type Parent { child: Child }
             type Child { parent: Parent @parent }
             """.trimIndent()
     }

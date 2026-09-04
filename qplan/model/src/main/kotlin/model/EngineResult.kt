@@ -439,10 +439,24 @@ private fun EngineResult?.hasSameCompletedResultAs(other: EngineResult?): Boolea
     }
 }
 
-private fun EngineResultCell.hasSameCompletedCellAs(other: EngineResultCell): Boolean {
+private fun EngineResultCell.hasSameCompletedCellAs(
+    other: EngineResultCell,
+    followValue: Boolean = true,
+): Boolean {
     val leftValue = completedValue
     val rightValue = other.completedValue
-    return leftValue.hasSameCompletedResultAs(rightValue) &&
+    val sameValue =
+        if (followValue) {
+            leftValue.hasSameCompletedResultAs(rightValue)
+        } else {
+            when {
+                leftValue == null || rightValue == null -> leftValue == null && rightValue == null
+                leftValue is ObjectEngineResult && rightValue is ObjectEngineResult ->
+                    leftValue.type == rightValue.type
+                else -> false
+            }
+        }
+    return sameValue &&
         completedAccessResult.hasSameCompletedAccessResultAs(other.completedAccessResult)
 }
 
@@ -614,8 +628,9 @@ private class CellImpl(
         if (mutable) valueStore.freeze(cause)
     }
 
-    fun requireCompleted() {
-        valueStore.readOrNull()?.get().requireCompleted()
+    fun requireCompleted(followValue: Boolean = true) {
+        val value = valueStore.readOrNull()?.get()
+        if (followValue) value.requireCompleted()
         accessResultStore.snapshot().values.forEach { promise -> promise.get() }
     }
 
@@ -727,7 +742,9 @@ private class ObjectResultImpl(
         get() = cellStore.completedCells()
 
     fun requireCompleted() {
-        cellStore.cellValues.forEach { cell -> cell.implementation.requireCompleted() }
+        cellStore.cellEntries.forEach { (key, cell) ->
+            cell.implementation.requireCompleted(followValue = key !is ObjectEngineResult.ParentKey)
+        }
     }
 }
 
@@ -744,8 +761,8 @@ private class ObjectCellStore(
     val keys: Set<ObjectEngineResult.ObjectKey>
         get() = synchronized(lock) { keySnapshot }
 
-    val cellValues: List<EngineResultCell>
-        get() = synchronized(lock) { cells.values.toList() }
+    val cellEntries: List<Map.Entry<ObjectEngineResult.ObjectKey, EngineResultCell>>
+        get() = synchronized(lock) { cells.toMap().entries.toList() }
 
     fun isSet(field: ObjectEngineResult.ObjectKey): Boolean = synchronized(lock) { field in cells }
 
@@ -782,8 +799,12 @@ private class ObjectCellStore(
 
     fun completedCells(): Map<ObjectEngineResult.ObjectKey, EngineResultCell> =
         synchronized(lock) {
-            cells.mapValues { (_, cell) ->
-                cell.also { it.implementation.requireCompleted() }
+            cells.mapValues { (key, cell) ->
+                cell.also {
+                    it.implementation.requireCompleted(
+                        followValue = key !is ObjectEngineResult.ParentKey,
+                    )
+                }
             }
         }
 
@@ -882,7 +903,10 @@ private fun ObjectEngineResult.sameCompletedObjectResultAs(other: ObjectEngineRe
             false
         } else {
             val rightCell = unmatchedRightCells.removeAt(matchIndex).value
-            leftCell.hasSameCompletedCellAs(rightCell)
+            leftCell.hasSameCompletedCellAs(
+                rightCell,
+                followValue = leftKey !is ObjectEngineResult.ParentKey,
+            )
         }
     }
 }
