@@ -5,13 +5,15 @@ import viaduct.graphql.schema.ViaductSchema
 import model.invariants.conformsToResultSchemaType
 
 /**
- * A finite, well-founded field-resolution result.
+ * A finite field-resolution result whose only reference edges are distinguished parent fields.
  *
  * The semantic union contains Int, finite Double, Boolean, String, [EngineIDResult],
  * [ViaductSchema.EnumValue], [ObjectEngineResult], [ListEngineResult], or [ErrorEngineResult]. Nullable
  * uses additionally represent GraphQL null. Membership and schema compatibility are enforced by
- * result constructors and cell completion boundaries. This union is equality-heterogeneous;
- * equality is defined only after narrowing to a member or homogeneous subset.
+ * result constructors and cell completion boundaries. Ordinary value containment is well-founded;
+ * a [ObjectEngineResult.ParentKey] cell may additionally point to an existing ancestor OER. This
+ * union is equality-heterogeneous; equality is defined only after narrowing to a member or
+ * homogeneous subset.
  */
 typealias EngineResult = Any
 
@@ -235,7 +237,37 @@ sealed interface ObjectEngineResult {
                 require(arguments.conformsToArgumentDefinition(field)) {
                     "Key arguments do not belong to its output field"
                 }
-                return GroundKeyImpl(field, arguments)
+                return if (field.isParentField()) {
+                    ParentKey.of(field, arguments)
+                } else {
+                    GroundKeyImpl(field, arguments)
+                }
+            }
+        }
+    }
+
+    /**
+     * A no-argument engine-provided field whose value references the containing object's parent.
+     *
+     * Parent keys remain ordinary selection and OER lookup keys. The refinement lets structural
+     * result algorithms avoid recursively unfolding their ancestor backedges.
+     */
+    sealed interface ParentKey : GroundKey {
+        companion object {
+            fun of(field: ViaductSchema.ObjectField): ParentKey =
+                of(field, Arguments.Resolved.of(field, emptyMap()))
+
+            fun of(
+                field: ViaductSchema.ObjectField,
+                arguments: Arguments.Ground,
+            ): ParentKey {
+                require(field.isParentField()) {
+                    "Parent key field must carry @$PARENT_DIRECTIVE_NAME"
+                }
+                require(arguments is Arguments.Resolved && arguments.fieldValues.isEmpty()) {
+                    "Parent key field must have no arguments"
+                }
+                return ParentKeyImpl(field, arguments)
             }
         }
     }
@@ -801,6 +833,11 @@ private data class GroundKeyImpl(
     override val field: ViaductSchema.ObjectField,
     override val arguments: Arguments.Ground,
 ) : ObjectEngineResult.GroundKey
+
+private data class ParentKeyImpl(
+    override val field: ViaductSchema.ObjectField,
+    override val arguments: Arguments.Ground,
+) : ObjectEngineResult.ParentKey
 
 private data class CompletedCell(
     val value: EngineResult?,

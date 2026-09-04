@@ -14,6 +14,9 @@ sealed interface Assumptions {
     val schema: ViaductSchema
     val resolverRegistry: ResolverRegistry
 
+    /** The validated child-to-parent relation and parent-to-child transpose for [schema]. */
+    val parentFieldRelations: ParentFieldRelations
+
     /** Whether resolver invocation and passive output traversal are selective to supplied demand. */
     val selectiveResolvers: Boolean
 
@@ -35,4 +38,6 @@ private class AssumptionsImpl(
     override val schema: ViaductSchema,
     override val resolverRegistry: ResolverRegistry,
     override val selectiveResolvers: Boolean,
-) : Assumptions
+) : Assumptions {
+    override val parentFieldRelations: ParentFieldRelations = ParentFieldRelations.of(schema)
+}
